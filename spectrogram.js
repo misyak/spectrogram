@@ -11,13 +11,14 @@
 
   var toString = Object.prototype.toString;
 
-  function Spectrogram(canvas, options) {
+  function Spectrogram(canvas, scaledCanvas, options) {
     if (!(this instanceof Spectrogram)) {
-      return new Spectrogram(canvas, options);
+      return new Spectrogram(canvas, scaledCanvas, options);
     }
 
     var baseCanvasOptions = options.canvas || {};
-    this._audioEnded = null;
+    var scaledCanvasOptions = options.scaledCanvas || {};
+    
     this._paused = null;
     this._pausedAt = null;
     this._startedAt = null;
@@ -31,9 +32,19 @@
     this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
     this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
 
+    this._scaledCanvas = scaledCanvas;
+
+    this._scaledCanvasContext = this._scaledCanvas.getContext('2d');
+    
+    this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+    this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
+
     window.onresize = function() {
       this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
       this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
+
+      this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+      this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
     }.bind(this);
 
     var audioOptions = options.audio || {};
@@ -51,6 +62,9 @@
 
     this._baseCanvasContext.fillStyle = this._getColor(0);
     this._baseCanvasContext.fillRect(0, 0, this._baseCanvas.width, this._baseCanvas.height);
+
+    this._scaledCanvasContext.fillStyle = this._getColor(0);
+    this._scaledCanvasContext.fillRect(0, 0, this._scaledCanvas.width, this._scaledCanvas.height);
   }
 
   Spectrogram.prototype._init = function() {
@@ -61,7 +75,7 @@
       var array = new Uint8Array(source.analyser.frequencyBinCount);
       source.analyser.getByteFrequencyData(array);
 
-      this._draw(array, source.canvasContext);
+      this._draw(array, source.baseCanvasContext, source.scaledCanvasContext);
     }.bind(this);
 
     source.sourceNode.onended = function() {
@@ -79,42 +93,61 @@
     }
   };
 
-  Spectrogram.prototype._draw = function(array, canvasContext) {
+  Spectrogram.prototype._draw = function(array, baseCanvasCtx, scaledCanvasCtx) {
       if (this._paused) {
         return false;
       }
 
-      var canvas = canvasContext.canvas;
-      var width = canvas.width;
-      var height = canvas.height;
-      var tempCanvasContext = canvasContext._tempContext;
+      var baseCanvas = baseCanvasCtx.canvas;
+      var baseWidth = baseCanvas.width;
+      var baseHeight = baseCanvas.height;
+
+      var scaledCanvas = scaledCanvasCtx.canvas;
+      var scaledWidth = scaledCanvas.width;
+      var scaledHeight = scaledCanvas.height;
+
+      var tempCanvasContext = baseCanvasCtx._tempContext;
       var tempCanvas = tempCanvasContext.canvas;
-      tempCanvasContext.drawImage(canvas, 0, 0, width, height);
+      tempCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
+
+      var tempScaledCanvasContext = scaledCanvasCtx._tempContext;
+      var tempScaledCanvas = tempScaledCanvasContext.canvas;
+      tempScaledCanvasContext.drawImage(scaledCanvas, 0, 0, scaledWidth, scaledHeight);
 
       for (var i = 0; i < array.length; i++) {
         var value = array[i];
-        canvasContext.fillStyle = this._getColor(value);
+        baseCanvasCtx.fillStyle = this._getColor(value);
+        scaledCanvasCtx.fillStyle = this._getColor(value);
         if (this._audioEnded) {
-          canvasContext.fillStyle = this._getColor(0);
+          baseCanvasCtx.fillStyle = this._getColor(0);
+          scaledCanvasCtx.fillStyle = this._getColor(0);
         }
-        canvasContext.fillRect(width - 1, height - i, 1, 1);
+        baseCanvasCtx.fillRect(0, baseHeight - i, 1, 1);
+        scaledCanvasCtx.fillRect(0, scaledHeight - i, 2, 1);
       }
 
-      canvasContext.translate(-1, 0);
+      baseCanvasCtx.translate(1, 0);
+      scaledCanvasCtx.translate(2, 0);
       // draw prev canvas before translation
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
+      baseCanvasCtx.drawImage(tempCanvas, 0, 0, baseWidth, baseHeight, 0, 0, baseWidth, baseHeight);
+      scaledCanvasCtx.drawImage(tempScaledCanvas, 0, 0, scaledWidth, scaledHeight, 0, 0, scaledWidth, scaledHeight);
       // reset transformation matrix
-      canvasContext.setTransform(1, 0, 0, 1, 0, 0);
+      baseCanvasCtx.setTransform(1, 0, 0, 1, 0, 0);
+      scaledCanvasCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-      this._baseCanvasContext.drawImage(canvas, 0, 0, width, height);
+      this._baseCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
+      this._scaledCanvasContext.drawImage(scaledCanvas, 0, 0, scaledWidth, scaledHeight);
   };
 
-  Spectrogram.prototype._startMediaStreamDraw = function(analyser, canvasContext) {
-    window.requestAnimationFrame(this._startMediaStreamDraw.bind(this, analyser, canvasContext));
+  Spectrogram.prototype._startMediaStreamDraw = function(analyser, baseCanvasContext, scaledCanvasContext) {
+    window.requestAnimationFrame(this._startMediaStreamDraw.bind(this, analyser, baseCanvasContext, scaledCanvasContext));
     var audioData = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(audioData);
-    this._draw(audioData, canvasContext);
+    this._draw(audioData, baseCanvasContext, scaledCanvasContext);
+  };
+
+  Spectrogram.prototype.drawScaled = function (sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight) {
+    this._scaledCanvasContext.drawImage(this._baseCanvas, sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight);
   };
 
   Spectrogram.prototype.connectSource = function(audioBuffer, audioContext) {
@@ -131,19 +164,30 @@
       var sourceNode = audioContext.createBufferSource();
       sourceNode.buffer = audioBuffer;
 
-      var canvasContext = source.canvasContext;
+      var baseCanvasContext = source.baseCanvasContext;
+      var scaledCanvasContext = source.scaledCanvasContext
 
-      if (!source.canvasContext) {
-        var canvas = document.createElement('canvas');
-        canvas.width = this._baseCanvas.width;
-        canvas.height = this._baseCanvas.height;
-        canvasContext = canvas.getContext('2d');
+      if (!source.baseCanvasContext || !source.scaledCanvasContext) {
+        var baseCanvas = document.createElement('canvas');
+        baseCanvas.width = this._baseCanvas.width;
+        baseCanvas.height = this._baseCanvas.height;
+        baseCanvasContext = baseCanvas.getContext('2d');
+
+        var scaledCanvas = document.createElement('canvas');
+        scaledCanvas.width = this._scaledCanvas.width;
+        scaledCanvas.height = this._scaledCanvas.height;
+        scaledCanvasContext = scaledCanvas.getContext('2d');
 
         var tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
+        tempCanvas.width = baseCanvas.width;
+        tempCanvas.height = baseCanvas.height; 
 
-        canvasContext._tempContext = tempCanvas.getContext('2d');
+        var tempScaledCanvas = document.createElement('canvas');
+        tempScaledCanvas.width = scaledCanvas.width;
+        tempScaledCanvas.height = scaledCanvas.height;
+
+        baseCanvasContext._tempContext = tempCanvas.getContext('2d');
+        scaledCanvasContext._tempContext = tempScaledCanvas.getContext('2d');
       }
 
       source = {
@@ -152,7 +196,8 @@
         sourceNode: sourceNode,
         analyser: null,
         scriptNode: null,
-        canvasContext: canvasContext
+        baseCanvasContext: baseCanvasContext,
+        scaledCanvasContext: scaledCanvasContext,
       };
 
       this._sources.audioBufferStream = source;
@@ -180,18 +225,29 @@
     // media stream uses an analyser for audio data
     if (sourceMedia && sourceMedia.analyser) {
       source = sourceMedia;
-      var canvas = document.createElement('canvas');
-      canvas.width = this._baseCanvas.width;
-      canvas.height = this._baseCanvas.height;
-      var canvasContext = canvas.getContext('2d');
+
+      var baseCanvas = document.createElement('canvas');
+      baseCanvas.width = this._baseCanvas.width;
+      baseCanvas.height = this._baseCanvas.height;
+      var baseCanvasContext = baseCanvas.getContext('2d');
 
       var tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
+      tempCanvas.width = baseCanvas.width;
+      tempCanvas.height = baseCanvas.height;
 
-      canvasContext._tempContext = tempCanvas.getContext('2d');
+      var scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = this._scaledCanvas.width;
+      scaledCanvas.height = this._scaledCanvas.height;
+      var scaledCanvasContext = scaledCanvas.getContext('2d');
 
-      this._startMediaStreamDraw(source.analyser, canvasContext);
+      var scaledTempCanvas = document.createElement('canvas');
+      scaledTempCanvas.width = scaledCanvas.width;
+      scaledTempCanvas.height = scaledCanvas.height;
+
+      baseCanvasContext._tempContext = tempCanvas.getContext('2d');
+      scaledCanvasContext._tempContext = scaledTempCanvas.getContext('2d');
+
+      this._startMediaStreamDraw(source.analyser, baseCanvasContext, scaledCanvasContext);
     }
   };
 
@@ -218,7 +274,7 @@
     }
   };
 
-  Spectrogram.prototype.clear = function(canvasContext) {
+  Spectrogram.prototype.clear = function() {
     var source = this._sources[Object.keys(this._sources)[0]];
 
     this.stop();
@@ -227,11 +283,18 @@
       source.scriptNode.onaudioprocess = null;
     }
 
-    canvasContext = canvasContext || source.canvasContext;
-    var canvas = canvasContext.canvas;
-    canvasContext.clearRect(0, 0, canvas.width, canvas.height);
-    canvasContext._tempContext.clearRect(0, 0, canvas.width, canvas.height);
-    this._baseCanvasContext.clearRect(0, 0, canvas.width, canvas.height);
+    const baseCanvasContext = source.baseCanvasContext;
+    const scaledCanvasContext = source.scaledCanvasContext;
+    const baseCanvas = baseCanvasContext.canvas;
+    const scaledCanvas = scaledCanvasContext.canvas;
+
+    baseCanvasContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+    baseCanvasContext._tempContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+    this._baseCanvasContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+
+    scaledCanvasContext.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
+    scaledCanvasContext._tempContext.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
+    this._scaledCanvasContext.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
   };
 
   Spectrogram.prototype._generateDefaultColors = function(steps) {
