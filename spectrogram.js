@@ -1,5 +1,6 @@
 (function(root) {
   'use strict';
+  var orderBy = require('lodash/orderBy');
 
   function _isFunction(v) {
     return typeof v === 'function';
@@ -118,8 +119,10 @@
 
   Spectrogram.prototype.createAndReduceGfccsArray = function (segments){
     const reducedGfccs = [];
-    Object.keys(segments).forEach((s)=>{
-      segments[s].gfccs.forEach((vector)=>{
+    const orderedSegments = orderBy(segments, 'sequence');
+
+    orderedSegments.forEach((segment)=>{
+      segment.gfccs.forEach((vector)=>{
         const gfccVector = [];
         vector.forEach((el, i) => {
           // using just coefficiets that are defined in options
