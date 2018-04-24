@@ -76,7 +76,7 @@
       const tempCanvas = tempCanvasContext.canvas;
       tempCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
 
-      const intervalLength = this._gfccInterval[1] - this._gfccInterval[0]
+      const intervalLength = this._gfccInterval[1] - this._gfccInterval[0];
       const pixels =  baseHeight/intervalLength;
 
       for (let i = 0; i < array.length; i++) {
