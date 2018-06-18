@@ -53,11 +53,12 @@
     this._colors = colors;
     this._gfccInterval = options.interval;
     this._colorSpectrumSteps = options.colorSpectrumSteps;
+    this._coefficentsNeeded = options.coefficentsNeeded;
     
-    this._baseCanvasContext.fillStyle = this.getColor(0);
+    this._baseCanvasContext.fillStyle = 'black';
     this._baseCanvasContext.fillRect(0, 0, this._baseCanvas.width, this._baseCanvas.height);
 
-    this._scaledCanvasContext.fillStyle = this.getColor(0);
+    this._scaledCanvasContext.fillStyle = 'black';
     this._scaledCanvasContext.fillRect(0, 0, this._scaledCanvas.width, this._scaledCanvas.height);
   }
 
@@ -82,8 +83,7 @@
       for (let i = 0; i < array.length; i++) {
         const value = array[i];
         baseCanvasCtx.fillStyle = this.getColor(value);
-
-        baseCanvasCtx.fillRect(baseWidth - 1, baseHeight - (i * pixels), 1, pixels);
+        baseCanvasCtx.fillRect(baseWidth - 1, baseHeight - (i * 1), 1, 1);
       }
 
       baseCanvasCtx.translate(-1, 0);
@@ -111,17 +111,19 @@
 
     baseCanvasContext._tempContext = tempCanvas.getContext('2d');
 
-    this._reducedGfcc = this.createAndReduceGfccsArray(segments);
-    this._normGfcc = this.normalizeValues(this._reducedGfcc, this.getMinValue(this._reducedGfcc), this.getMaxValue(this._reducedGfcc), this._colorSpectrumSteps);    
-
-    this.drawGfccSpectrogram(this._normGfcc, baseCanvasContext);
+    this._reducedGfccs = this.createAndReduceGfccsArray(segments);
+    this._interpolatedGfccs = this.interpolateGfccsArray(this._reducedGfccs, this._coefficentsNeeded);
+    this._normGfccs = this.normalizeValues(this._interpolatedGfccs, this._colorSpectrumSteps);
+    
+    this.drawGfccSpectrogram(this._normGfccs, baseCanvasContext);
   };
 
   Spectrogram.prototype.createAndReduceGfccsArray = function (segments){
-    const reducedGfccs = [];
+    const reducedSegments = [];
     const orderedSegments = orderBy(segments, 'sequence');
 
     orderedSegments.forEach((segment)=>{
+      const reducedGfccs = [];
       segment.gfccs.forEach((vector)=>{
         const gfccVector = [];
         vector.forEach((el, i) => {
@@ -132,8 +134,9 @@
         });
         reducedGfccs.push(gfccVector);
       });
+      reducedSegments.push(reducedGfccs);
     });
-    return reducedGfccs;
+    return reducedSegments;
   };
 
   Spectrogram.prototype.clear = function() {
@@ -194,29 +197,67 @@
     return min;
   };
 
-  Spectrogram.prototype.normalizeValues = function(source, minValue, maxValue, colorsCount) {
-    const valuesRange = maxValue - minValue;
-    const oneColorRange = valuesRange / colorsCount;
+  Spectrogram.prototype.interpolateGfccsArray = function(source, finalCount) {
+    const interpolatedSegments = [];
 
-    const normMin = Math.floor(minValue / oneColorRange);
-    const normMax = Math.floor(maxValue / oneColorRange);
-
-    const normalizationArray = [];
-
-    for (let i = normMin; i <= normMax; i++) {
-      normalizationArray.push(i);
+    const linearInterpolate = function (previousValue, nextValue, atPoint) {
+      return previousValue + (nextValue - previousValue) * atPoint;
     }
 
-    const normalizedVectros = [];
-    source.forEach( vector => {
-      const normalizedValues = [];
-      vector.forEach( value => {
-        const normValue = Math.floor(value / oneColorRange);
-        normalizedValues.push(normalizationArray.indexOf(normValue));
+    source.forEach( segment => {
+      const interpolatedGfccs = [];
+      segment.forEach( vector => {
+        const interpolatedVector = [];
+        const springFactor = (vector.length - 1) / (finalCount - 1);
+  
+        interpolatedVector[0] = vector[0];
+        for ( let i = 1; i < finalCount - 1; i++) {
+          const tmp = i * springFactor;
+          const previousIndex = Math.floor(tmp).toFixed();
+          const nextIndex = Math.ceil(tmp).toFixed();
+          const atPoint = tmp - previousIndex;
+          
+          const newValue = linearInterpolate(vector[previousIndex], vector[nextIndex], atPoint);
+          
+          interpolatedVector[i] = newValue;
+        }
+        interpolatedVector[finalCount - 1] = vector[vector.length - 1];
+        interpolatedGfccs.push(interpolatedVector);
       });
-      normalizedVectros.push(normalizedValues);
+      interpolatedSegments.push(interpolatedGfccs);
     });
-    return normalizedVectros;
+    return interpolatedSegments;
+  };
+
+  Spectrogram.prototype.normalizeValues = function(source, colorsCount) {
+    const normalizedGfccs = [];
+
+    source.forEach( segment => {
+      const maxValue = this.getMaxValue(segment);
+      const minValue = this.getMinValue(segment);
+
+      const valuesRange = maxValue - minValue;
+      const oneColorRange = valuesRange / colorsCount;
+  
+      const normMin = Math.floor(minValue / oneColorRange);
+      const normMax = Math.floor(maxValue / oneColorRange);
+  
+      const normalizationArray = [];
+  
+      for (let i = normMin; i <= normMax; i++) {
+        normalizationArray.push(i);
+      }
+
+      segment.forEach( vector => {
+        const normalizedValues = [];
+        vector.forEach( value => {
+          const normValue = Math.floor(value / oneColorRange);
+          normalizedValues.push(normalizationArray.indexOf(normValue));
+        });
+        normalizedGfccs.push(normalizedValues);
+      });
+    });
+    return normalizedGfccs;
   };
 
   if (typeof exports !== 'undefined') {
