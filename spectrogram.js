@@ -17,8 +17,17 @@
       return new Spectrogram(canvas, scaledCanvas, options);
     }
 
+    if (scaledCanvas) {
+      const scaledCanvasOptions = options.scaledCanvas || {};
+      this._scaledCanvas = scaledCanvas;
+
+      this._scaledCanvasContext = this._scaledCanvas.getContext('2d');
+    
+      this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+      this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
+    }
+
     const baseCanvasOptions = options.canvas || {};
-    const scaledCanvasOptions = options.scaledCanvas || {};
     
     this._baseCanvas = canvas;
     this._baseCanvasContext = this._baseCanvas.getContext('2d');
@@ -26,19 +35,16 @@
     this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
     this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
 
-    this._scaledCanvas = scaledCanvas;
-
-    this._scaledCanvasContext = this._scaledCanvas.getContext('2d');
     
-    this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
-    this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
 
     window.onresize = function() {
       this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
       this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
 
-      this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
-      this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
+      if (scaledCanvas) {
+        this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+        this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
+      }
     }.bind(this);
 
 
@@ -58,8 +64,10 @@
     this._baseCanvasContext.fillStyle = 'black';
     this._baseCanvasContext.fillRect(0, 0, this._baseCanvas.width, this._baseCanvas.height);
 
-    this._scaledCanvasContext.fillStyle = 'black';
-    this._scaledCanvasContext.fillRect(0, 0, this._scaledCanvas.width, this._scaledCanvas.height);
+    if (scaledCanvas) {
+      this._scaledCanvasContext.fillStyle = 'black';
+      this._scaledCanvasContext.fillRect(0, 0, this._scaledCanvas.width, this._scaledCanvas.height);
+    }
   }
 
   Spectrogram.prototype.drawGfccSpectrogram = function(gfccSignals, baseCanvasCtx) {
@@ -83,10 +91,10 @@
       for (let i = 0; i < array.length; i++) {
         const value = array[i];
         baseCanvasCtx.fillStyle = this.getColor(value);
-        baseCanvasCtx.fillRect(baseWidth - 1, baseHeight - (i * 1), 1, 1);
+        baseCanvasCtx.fillRect(baseWidth - 2, baseHeight - (i * 2), 2, 2);
       }
 
-      baseCanvasCtx.translate(-1, 0);
+      baseCanvasCtx.translate(-2, 0);
       // draw prev canvas before translation
       baseCanvasCtx.drawImage(tempCanvas, 0, 0, baseWidth, baseHeight, 0, 0, baseWidth, baseHeight);
       // reset transformation matrix
