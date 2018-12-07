@@ -1,5 +1,6 @@
 (function(root) {
   'use strict';
+  var orderBy = require('lodash/orderBy');
 
   function _isFunction(v) {
     return typeof v === 'function';
@@ -9,244 +10,158 @@
     return _isFunction(v) ? v() : v;
   }
 
-  var toString = Object.prototype.toString;
+  const toString = Object.prototype.toString;
 
-  function Spectrogram(canvas, options) {
+  function Spectrogram(canvas, scaledCanvas, options) {
     if (!(this instanceof Spectrogram)) {
-      return new Spectrogram(canvas, options);
+      return new Spectrogram(canvas, scaledCanvas, options);
     }
 
-    var baseCanvasOptions = options.canvas || {};
-    this._audioEnded = null;
-    this._paused = null;
-    this._pausedAt = null;
-    this._startedAt = null;
-    this._sources = {
-      audioBufferStream: null,
-      userMediaStream: null
-    };
+    const baseCanvasOptions = options.canvas || {};
+    const scaledCanvasOptions = options.scaledCanvas || {};
+    
     this._baseCanvas = canvas;
     this._baseCanvasContext = this._baseCanvas.getContext('2d');
 
     this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
     this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
 
+    this._scaledCanvas = scaledCanvas;
+
+    this._scaledCanvasContext = this._scaledCanvas.getContext('2d');
+    
+    this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+    this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
+
     window.onresize = function() {
       this._baseCanvas.width = _result(baseCanvasOptions.width) || this._baseCanvas.width;
       this._baseCanvas.height = _result(baseCanvasOptions.height) || this._baseCanvas.height;
+
+      this._scaledCanvas.width = _result(scaledCanvasOptions.width) || this._scaledCanvas.width;
+      this._scaledCanvas.height = _result(scaledCanvasOptions.height) || this._scaledCanvas.height;
     }.bind(this);
 
-    var audioOptions = options.audio || {};
-    this.audio = audioOptions;
 
-    var colors = [];
+    let colors = [];
 
     if (typeof options.colors === 'function') {
-      colors = options.colors(275);
+      colors = options.colors(options.colorSpectrumSteps);
     } else {
-      colors = this._generateDefaultColors(275);
+      colors = this.generateDefaultColors(options.colorSpectrumSteps);
     }
 
     this._colors = colors;
-
-    this._baseCanvasContext.fillStyle = this._getColor(0);
+    this._gfccInterval = options.interval;
+    this._colorSpectrumSteps = options.colorSpectrumSteps;
+    this._coefficentsNeeded = options.coefficentsNeeded;
+    
+    this._baseCanvasContext.fillStyle = 'black';
     this._baseCanvasContext.fillRect(0, 0, this._baseCanvas.width, this._baseCanvas.height);
+
+    this._scaledCanvasContext.fillStyle = 'black';
+    this._scaledCanvasContext.fillRect(0, 0, this._scaledCanvas.width, this._scaledCanvas.height);
   }
 
-  Spectrogram.prototype._init = function() {
-    var source = this._sources.audioBufferStream;
-    source.scriptNode = source.audioContext.createScriptProcessor(2048, 1, 1);
-    source.scriptNode.connect(source.audioContext.destination);
-    source.scriptNode.onaudioprocess = function(event) {
-      var array = new Uint8Array(source.analyser.frequencyBinCount);
-      source.analyser.getByteFrequencyData(array);
-
-      this._draw(array, source.canvasContext);
-    }.bind(this);
-
-    source.sourceNode.onended = function() {
-      this.stop();
-    }.bind(this);
-
-    source.analyser = source.audioContext.createAnalyser();
-    source.analyser.smoothingTimeConstant = 0;
-    source.analyser.fftSize = 1024;
-
-    source.analyser.connect(source.scriptNode);
-    source.sourceNode.connect(source.analyser);
-    if (this.audio.enable) {
-      source.sourceNode.connect(source.audioContext.destination);
-    }
+  Spectrogram.prototype.drawGfccSpectrogram = function(gfccSignals, baseCanvasCtx) {
+    gfccSignals.forEach( signalsVector => {
+      this.draw(signalsVector, baseCanvasCtx);
+    });
   };
 
-  Spectrogram.prototype._draw = function(array, canvasContext) {
-      if (this._paused) {
-        return false;
+  Spectrogram.prototype.draw = function(array, baseCanvasCtx) {
+      const baseCanvas = baseCanvasCtx.canvas;
+      const baseWidth = baseCanvas.width;
+      const baseHeight = baseCanvas.height;
+
+      const tempCanvasContext = baseCanvasCtx._tempContext;
+      const tempCanvas = tempCanvasContext.canvas;
+      tempCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
+
+      const intervalLength = this._gfccInterval[1] - this._gfccInterval[0];
+      const pixels =  baseHeight/intervalLength;
+
+      for (let i = 0; i < array.length; i++) {
+        const value = array[i];
+        baseCanvasCtx.fillStyle = this.getColor(value);
+        baseCanvasCtx.fillRect(baseWidth - 1, baseHeight - (i * 1), 1, 1);
       }
 
-      var canvas = canvasContext.canvas;
-      var width = canvas.width;
-      var height = canvas.height;
-      var tempCanvasContext = canvasContext._tempContext;
-      var tempCanvas = tempCanvasContext.canvas;
-      tempCanvasContext.drawImage(canvas, 0, 0, width, height);
-
-      for (var i = 0; i < array.length; i++) {
-        var value = array[i];
-        canvasContext.fillStyle = this._getColor(value);
-        if (this._audioEnded) {
-          canvasContext.fillStyle = this._getColor(0);
-        }
-        canvasContext.fillRect(width - 1, height - i, 1, 1);
-      }
-
-      canvasContext.translate(-1, 0);
+      baseCanvasCtx.translate(-1, 0);
       // draw prev canvas before translation
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
+      baseCanvasCtx.drawImage(tempCanvas, 0, 0, baseWidth, baseHeight, 0, 0, baseWidth, baseHeight);
       // reset transformation matrix
-      canvasContext.setTransform(1, 0, 0, 1, 0, 0);
+      baseCanvasCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-      this._baseCanvasContext.drawImage(canvas, 0, 0, width, height);
+      this._baseCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
   };
 
-  Spectrogram.prototype._startMediaStreamDraw = function(analyser, canvasContext) {
-    window.requestAnimationFrame(this._startMediaStreamDraw.bind(this, analyser, canvasContext));
-    var audioData = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(audioData);
-    this._draw(audioData, canvasContext);
+  Spectrogram.prototype.drawScaled = function (sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight) {
+    this._scaledCanvasContext.drawImage(this._baseCanvas, sX, sY, sWidth, sHeight, dX, dY, dWidth, dHeight);
   };
 
-  Spectrogram.prototype.connectSource = function(audioBuffer, audioContext) {
-    var source = this._sources.audioBufferStream || {};
+  Spectrogram.prototype.createCanvases = function(segments) {
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = this._baseCanvas.width;
+    baseCanvas.height = this._baseCanvas.height;
+    const baseCanvasContext = baseCanvas.getContext('2d');
 
-    // clear current audio process
-    if (toString.call(source.scriptNode) === '[object ScriptProcessorNode]') {
-      source.scriptNode.onaudioprocess = null;
-    }
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = baseCanvas.width;
+    tempCanvas.height = baseCanvas.height;
 
-    if (toString.call(audioBuffer) === '[object AudioBuffer]') {
-      audioContext = (!audioContext && source.audioBuffer.context) || (!audioContext && source.audioContext) || audioContext;
+    baseCanvasContext._tempContext = tempCanvas.getContext('2d');
 
-      var sourceNode = audioContext.createBufferSource();
-      sourceNode.buffer = audioBuffer;
-
-      var canvasContext = source.canvasContext;
-
-      if (!source.canvasContext) {
-        var canvas = document.createElement('canvas');
-        canvas.width = this._baseCanvas.width;
-        canvas.height = this._baseCanvas.height;
-        canvasContext = canvas.getContext('2d');
-
-        var tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-
-        canvasContext._tempContext = tempCanvas.getContext('2d');
-      }
-
-      source = {
-        audioBuffer: audioBuffer,
-        audioContext: audioContext,
-        sourceNode: sourceNode,
-        analyser: null,
-        scriptNode: null,
-        canvasContext: canvasContext
-      };
-
-      this._sources.audioBufferStream = source;
-      this._init();
-    }
-
-    if (toString.call(audioBuffer) === '[object AnalyserNode]') {
-      source = this._sources.userMediaStream || {};
-      source.analyser = audioBuffer;
-      this._sources.userMediaStream = source;
-    }
+    this._reducedGfccs = this.createAndReduceGfccsArray(segments);
+    this._interpolatedGfccs = this.interpolateGfccsArray(this._reducedGfccs, this._coefficentsNeeded);
+    this._normGfccs = this.normalizeValues(this._interpolatedGfccs, this._colorSpectrumSteps);
+    
+    this.drawGfccSpectrogram(this._normGfccs, baseCanvasContext);
   };
 
-  Spectrogram.prototype.start = function(offset) {
-    var source = this._sources.audioBufferStream;
-    var sourceMedia = this._sources.userMediaStream;
+  Spectrogram.prototype.createAndReduceGfccsArray = function (segments){
+    const reducedSegments = [];
+    const orderedSegments = orderBy(segments, 'sequence');
 
-    if (source && source.sourceNode) {
-      source.sourceNode.start(0, offset||0);
-      this._audioEnded = false;
-      this._paused = false;
-      this._startedAt = Date.now();
-    }
-
-    // media stream uses an analyser for audio data
-    if (sourceMedia && sourceMedia.analyser) {
-      source = sourceMedia;
-      var canvas = document.createElement('canvas');
-      canvas.width = this._baseCanvas.width;
-      canvas.height = this._baseCanvas.height;
-      var canvasContext = canvas.getContext('2d');
-
-      var tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
-
-      canvasContext._tempContext = tempCanvas.getContext('2d');
-
-      this._startMediaStreamDraw(source.analyser, canvasContext);
-    }
+    orderedSegments.forEach((segment)=>{
+      const reducedGfccs = [];
+      segment.gfccs.forEach((vector)=>{
+        const gfccVector = [];
+        vector.forEach((el, i) => {
+          // using just coefficiets that are defined in options
+          if (i >= this._gfccInterval[0] && i <= this._gfccInterval[1]) {
+            gfccVector.push(el);
+          }
+        });
+        reducedGfccs.push(gfccVector);
+      });
+      reducedSegments.push(reducedGfccs);
+    });
+    return reducedSegments;
   };
 
-  Spectrogram.prototype.stop = function() {
-    var source = this._sources[Object.keys(this._sources)[0]];
-    if (source && source.sourceNode) {
-      source.sourceNode.stop();
-    }
-    this._audioEnded = true;
+  Spectrogram.prototype.clear = function() {
+    let baseCanvas, scaledCanvas;
+
+    baseCanvas = this._baseCanvasContext.canvas;
+    scaledCanvas = this._scaledCanvasContext.canvas;
+
+    this._baseCanvasContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+    this._scaledCanvasContext.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
   };
 
-  Spectrogram.prototype.pause = function() {
-    this.stop();
-    this._paused = true;
-    this._pausedAt += Date.now() - this._startedAt;
-  };
-
-  Spectrogram.prototype.resume = function(offset) {
-    var source = this._sources[Object.keys(this._sources)[0]];
-    this._paused = false;
-    if (this._pausedAt) {
-      this.connectSource(source.audioBuffer, source.audioContext);
-      this.start(offset || (this._pausedAt / 1000));
-    }
-  };
-
-  Spectrogram.prototype.clear = function(canvasContext) {
-    var source = this._sources[Object.keys(this._sources)[0]];
-
-    this.stop();
-
-    if (toString.call(source.scriptNode) === '[object ScriptProcessorNode]') {
-      source.scriptNode.onaudioprocess = null;
-    }
-
-    canvasContext = canvasContext || source.canvasContext;
-    var canvas = canvasContext.canvas;
-    canvasContext.clearRect(0, 0, canvas.width, canvas.height);
-    canvasContext._tempContext.clearRect(0, 0, canvas.width, canvas.height);
-    this._baseCanvasContext.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  Spectrogram.prototype._generateDefaultColors = function(steps) {
-    var frequency = Math.PI / steps;
-    var amplitude = 127;
-    var center = 128;
-    var slice = (Math.PI / 2) * 3.1;
-    var colors = [];
+  Spectrogram.prototype.generateDefaultColors = function(steps) {
+    const frequency = Math.PI / steps;
+    const amplitude = 127;
+    const center = 128;
+    const slice = (Math.PI / 2) * 3.1;
+    let colors = [];
 
     function toRGBString(v) {
       return 'rgba(' + [v,v,v,1].toString() + ')';
     }
 
-    for (var i = 0; i < steps; i++) {
-      var v = (Math.sin((frequency * i) + slice) * amplitude + center) >> 0;
+    for (let i = 0; i < steps; i++) {
+      let v = (Math.sin((frequency * i) + slice) * amplitude + center) >> 0;
 
       colors.push(toRGBString(v));
     }
@@ -254,14 +169,95 @@
     return colors;
   };
 
-  Spectrogram.prototype._getColor = function(index) {
-    var color = this._colors[index>>0];
+  Spectrogram.prototype.getColor = function(index) {
+    let color = this._colors[index>>0];
 
     if (typeof color === 'undefined') {
       color = this._colors[0];
     }
 
     return color;
+  };
+
+  Spectrogram.prototype.getMaxValue = function(source) {
+    let max = Math.max(...source[0]);
+    source.forEach(vector =>{
+      const actualMax = Math.max(...vector);
+      max = (actualMax > max) ? actualMax : max;
+    })
+    return max;
+  };
+
+  Spectrogram.prototype.getMinValue = function(source) {
+    let min = Math.min(...source[0]);
+    source.forEach(vector=>{
+      const actualMin = Math.min(...vector);
+      min = (actualMin < min) ? actualMin : min;
+    })
+    return min;
+  };
+
+  Spectrogram.prototype.interpolateGfccsArray = function(source, finalCount) {
+    const interpolatedSegments = [];
+
+    const linearInterpolate = function (previousValue, nextValue, atPoint) {
+      return previousValue + (nextValue - previousValue) * atPoint;
+    }
+
+    source.forEach( segment => {
+      const interpolatedGfccs = [];
+      segment.forEach( vector => {
+        const interpolatedVector = [];
+        const springFactor = (vector.length - 1) / (finalCount - 1);
+  
+        interpolatedVector[0] = vector[0];
+        for ( let i = 1; i < finalCount - 1; i++) {
+          const tmp = i * springFactor;
+          const previousIndex = Math.floor(tmp).toFixed();
+          const nextIndex = Math.ceil(tmp).toFixed();
+          const atPoint = tmp - previousIndex;
+          
+          const newValue = linearInterpolate(vector[previousIndex], vector[nextIndex], atPoint);
+          
+          interpolatedVector[i] = newValue;
+        }
+        interpolatedVector[finalCount - 1] = vector[vector.length - 1];
+        interpolatedGfccs.push(interpolatedVector);
+      });
+      interpolatedSegments.push(interpolatedGfccs);
+    });
+    return interpolatedSegments;
+  };
+
+  Spectrogram.prototype.normalizeValues = function(source, colorsCount) {
+    const normalizedGfccs = [];
+
+    source.forEach( segment => {
+      const maxValue = this.getMaxValue(segment);
+      const minValue = this.getMinValue(segment);
+
+      const valuesRange = maxValue - minValue;
+      const oneColorRange = valuesRange / colorsCount;
+  
+      const normMin = Math.floor(minValue / oneColorRange);
+      const normMax = Math.floor(maxValue / oneColorRange);
+  
+      const normalizationArray = [];
+  
+      for (let i = normMin; i <= normMax; i++) {
+        normalizationArray.push(i);
+      }
+
+      segment.forEach( vector => {
+        const normalizedValues = [];
+        vector.forEach( value => {
+          const normValue = Math.floor(value / oneColorRange);
+          normalizedValues.push(normalizationArray.indexOf(normValue));
+        });
+        normalizedGfccs.push(normalizedValues);
+      });
+    });
+    return normalizedGfccs;
   };
 
   if (typeof exports !== 'undefined') {
