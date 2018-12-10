@@ -216,10 +216,10 @@
       const interpolatedGfccs = [];
       segment.forEach( vector => {
         const interpolatedVector = [];
-        const springFactor = (vector.length - 1) / (finalCount - 1);
+        const springFactor = (vector.length - 1) / (finalCount);
   
         interpolatedVector[0] = vector[0];
-        for ( let i = 1; i < finalCount - 1; i++) {
+        for ( let i = 1; i < finalCount; i++) {
           const tmp = i * springFactor;
           const previousIndex = Math.floor(tmp).toFixed();
           const nextIndex = Math.ceil(tmp).toFixed();
@@ -229,7 +229,7 @@
           
           interpolatedVector[i] = newValue;
         }
-        interpolatedVector[finalCount - 1] = vector[vector.length - 1];
+        interpolatedVector[finalCount] = vector[vector.length - 1];
         interpolatedGfccs.push(interpolatedVector);
       });
       interpolatedSegments.push(interpolatedGfccs);
