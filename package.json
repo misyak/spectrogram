@@ -35,7 +35,7 @@
   },
   "homepage": "https://github.com/miguelmota/spectrogram",
   "devDependencies": {
-    "tape": "^3.0.3"
+    "tape": "^4.9.2"
   },
   "engines": {
     "node": ">=0.10.0"
