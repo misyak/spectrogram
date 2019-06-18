@@ -1,6 +1,8 @@
 (function(root) {
   'use strict';
 
+  const BACKGROUND_COLOR = "#210d3e";
+
   function _isFunction(v) {
     return typeof v === 'function';
   }
@@ -43,14 +45,23 @@
 
     if (typeof options.colors === 'function') {
       colors = options.colors(275);
+
+    } else if (typeof options.colors === 'object') {
+      for (var i = 0; i < options.colors.length; i++) {
+        colors.push(toRGBString(options.colors[i]));
+      }
     } else {
       colors = this._generateDefaultColors(275);
     }
 
     this._colors = colors;
 
-    this._baseCanvasContext.fillStyle = this._getColor(0);
+    this._baseCanvasContext.fillStyle = BACKGROUND_COLOR;
     this._baseCanvasContext.fillRect(0, 0, this._baseCanvas.width, this._baseCanvas.height);
+
+    function toRGBString(color) {
+      return 'rgba(' + [color[0],color[1],color[2],1].toString() + ')';
+    }
   }
 
   Spectrogram.prototype._init = function() {
@@ -93,9 +104,10 @@
 
       for (var i = 0; i < array.length; i++) {
         var value = array[i];
-        canvasContext.fillStyle = this._getColor(value);
+        var color = this._getColor(value);
+        canvasContext.fillStyle = (color === this._colors[0]) ? BACKGROUND_COLOR : color;
         if (this._audioEnded) {
-          canvasContext.fillStyle = this._getColor(0);
+          canvasContext.fillStyle = BACKGROUND_COLOR;
         }
         canvasContext.fillRect(width - 1, height - i, 1, 1);
       }
