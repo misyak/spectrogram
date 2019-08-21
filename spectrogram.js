@@ -19,6 +19,8 @@
     }
 
     var baseCanvasOptions = options.canvas || {};
+    this._fragmentsQueue = [];
+    this._isDrawing = false;
     this._audioEnded = null;
     this._paused = null;
     this._pausedAt = null;
@@ -64,202 +66,101 @@
     }
   }
 
-  Spectrogram.prototype._init = function() {
-    var source = this._sources.audioBufferStream;
-    source.scriptNode = source.audioContext.createScriptProcessor(2048, 1, 1);
-    source.scriptNode.connect(source.audioContext.destination);
-    source.scriptNode.onaudioprocess = function(event) {
-      var array = new Uint8Array(source.analyser.frequencyBinCount);
-      source.analyser.getByteFrequencyData(array);
+  Spectrogram.prototype.drawSpectrogram = function (data, baseCanvasCtx) {
+    return new Promise((resolve) => {
 
-      this._draw(array, source.canvasContext);
-    }.bind(this);
-
-    source.sourceNode.onended = function() {
-      this.stop();
-    }.bind(this);
-
-    source.analyser = source.audioContext.createAnalyser();
-    source.analyser.smoothingTimeConstant = 0;
-    source.analyser.fftSize = 1024;
-
-    source.analyser.connect(source.scriptNode);
-    source.sourceNode.connect(source.analyser);
-    if (this.audio.enable) {
-      source.sourceNode.connect(source.audioContext.destination);
-    }
-  };
-
-  Spectrogram.prototype._draw = function(array, canvasContext) {
-      if (this._paused) {
-        return false;
+      const step = 30;
+      this._isDrawing = true;
+      console.log('DATA LENGTH IN DRAW ',data.length);
+      for (let i=0; i < data.length; i++) {
+        setTimeout(()=>{
+          (i % 100 === 0 ) ? console.log('DRAW I ', i) : null;
+          this.draw(data[i], baseCanvasCtx);
+        }, i * step);
       }
 
-      var canvas = canvasContext.canvas;
-      var width = canvas.width;
-      var height = canvas.height;
-      var tempCanvasContext = canvasContext._tempContext;
-      var tempCanvas = tempCanvasContext.canvas;
-      tempCanvasContext.drawImage(canvas, 0, 0, width, height);
-
-      for (var i = 0; i < array.length; i++) {
-        var value = array[i];
-        var color = this._getColor(value);
-        canvasContext.fillStyle = (color === this._colors[0]) ? BACKGROUND_COLOR : color;
-        if (this._audioEnded) {
-          canvasContext.fillStyle = BACKGROUND_COLOR;
-        }
-        canvasContext.fillRect(width - 1, height - i, 1, 1);
-      }
-
-      canvasContext.translate(-1, 0);
-      // draw prev canvas before translation
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
-      canvasContext.drawImage(tempCanvas, 0, 0, width, height, 0, 0, width, height);
-      // reset transformation matrix
-      canvasContext.setTransform(1, 0, 0, 1, 0, 0);
-
-      this._baseCanvasContext.drawImage(canvas, 0, 0, width, height);
+      setTimeout(()=>{
+        this._isDrawing = false;
+        resolve(baseCanvasCtx);
+      }, data.length * step);
+    })
   };
 
-  Spectrogram.prototype._startMediaStreamDraw = function(analyser, canvasContext) {
-    window.requestAnimationFrame(this._startMediaStreamDraw.bind(this, analyser, canvasContext));
-    var audioData = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(audioData);
-    this._draw(audioData, canvasContext);
+  Spectrogram.prototype.draw = function(array, baseCanvasCtx) {
+    const baseCanvas = baseCanvasCtx.canvas;
+    const baseWidth = baseCanvas.width;
+    const baseHeight = baseCanvas.height;
+
+    const tempCanvasContext = baseCanvasCtx._tempContext;
+    const tempCanvas = tempCanvasContext.canvas;
+    tempCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
+
+    for (let i = 0; i < array.length; i++) {
+      const value = array[i];
+      baseCanvasCtx.fillStyle = this.getColor(value);
+      baseCanvasCtx.fillRect(baseWidth - 1, baseHeight - (i * 1), 1, 1);
+    }
+
+    baseCanvasCtx.translate(-1, 0);
+    // draw prev canvas before translation
+    baseCanvasCtx.drawImage(tempCanvas, 0, 0, baseWidth, baseHeight, 0, 0, baseWidth, baseHeight);
+    // reset transformation matrix
+    baseCanvasCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+    this._baseCanvasContext.drawImage(baseCanvas, 0, 0, baseWidth, baseHeight);
   };
 
-  Spectrogram.prototype.connectSource = function(audioBuffer, audioContext) {
-    var source = this._sources.audioBufferStream || {};
+  Spectrogram.prototype.createCanvas = function(data) {
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = this._baseCanvas.width;
+    baseCanvas.height = this._baseCanvas.height;
+    const baseCanvasContext = baseCanvas.getContext('2d');
 
-    // clear current audio process
-    if (toString.call(source.scriptNode) === '[object ScriptProcessorNode]') {
-      source.scriptNode.onaudioprocess = null;
-    }
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = baseCanvas.width;
+    tempCanvas.height = baseCanvas.height;
 
-    if (toString.call(audioBuffer) === '[object AudioBuffer]') {
-      audioContext = (!audioContext && source.audioBuffer.context) || (!audioContext && source.audioContext) || audioContext;
+    baseCanvasContext._tempContext = tempCanvas.getContext('2d');
 
-      var sourceNode = audioContext.createBufferSource();
-      sourceNode.buffer = audioBuffer;
-
-      var canvasContext = source.canvasContext;
-
-      if (!source.canvasContext) {
-        var canvas = document.createElement('canvas');
-        canvas.width = this._baseCanvas.width;
-        canvas.height = this._baseCanvas.height;
-        canvasContext = canvas.getContext('2d');
-
-        var tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-
-        canvasContext._tempContext = tempCanvas.getContext('2d');
-      }
-
-      source = {
-        audioBuffer: audioBuffer,
-        audioContext: audioContext,
-        sourceNode: sourceNode,
-        analyser: null,
-        scriptNode: null,
-        canvasContext: canvasContext
-      };
-
-      this._sources.audioBufferStream = source;
-      this._init();
-    }
-
-    if (toString.call(audioBuffer) === '[object AnalyserNode]') {
-      source = this._sources.userMediaStream || {};
-      source.analyser = audioBuffer;
-      this._sources.userMediaStream = source;
+    if (!this._isDrawing) {
+      this.drawSpectrogram(data, baseCanvasContext).then(()=>{
+        this.processQueue(baseCanvasContext);
+      });
+    } else {
+      this._fragmentsQueue.push(data);
     }
   };
 
-  Spectrogram.prototype.start = function(offset) {
-    var source = this._sources.audioBufferStream;
-    var sourceMedia = this._sources.userMediaStream;
-
-    if (source && source.sourceNode) {
-      source.sourceNode.start(0, offset||0);
-      this._audioEnded = false;
-      this._paused = false;
-      this._startedAt = Date.now();
-    }
-
-    // media stream uses an analyser for audio data
-    if (sourceMedia && sourceMedia.analyser) {
-      source = sourceMedia;
-      var canvas = document.createElement('canvas');
-      canvas.width = this._baseCanvas.width;
-      canvas.height = this._baseCanvas.height;
-      var canvasContext = canvas.getContext('2d');
-
-      var tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
-
-      canvasContext._tempContext = tempCanvas.getContext('2d');
-
-      this._startMediaStreamDraw(source.analyser, canvasContext);
+  Spectrogram.prototype.processQueue = function (baseCanvasCtx) {
+    if (this._fragmentsQueue.length > 0 && !this._isDrawing) {
+      const dataToDraw = this._fragmentsQueue.shift();
+      this.drawSpectrogram(dataToDraw, baseCanvasCtx).then(()=>{
+        this.processQueue(baseCanvasCtx);
+      });
     }
   };
 
-  Spectrogram.prototype.stop = function() {
-    var source = this._sources[0];
-    if (source && source.sourceNode) {
-      source.sourceNode.stop();
-    }
-    this._audioEnded = true;
+  Spectrogram.prototype.clear = function() {
+    let baseCanvas;
+  
+    baseCanvas = this._baseCanvasContext.canvas;
+  
+    this._baseCanvasContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
   };
 
-  Spectrogram.prototype.pause = function() {
-    this.stop();
-    this._paused = true;
-    this._pausedAt = Date.now() - this._startedAt;
-  };
-
-  Spectrogram.prototype.resume = function(offset) {
-    var source = this._sources[0];
-    this._paused = false;
-    if (this._pausedAt) {
-		  this._startedAt = Date.now() - this._pausedAt;
-      this.connectSource(source.audioBuffer, source.audioContext);
-      this.start(offset || (this._pausedAt / 1000));
-    }
-  };
-
-  Spectrogram.prototype.clear = function(canvasContext) {
-    var source = this._sources[0];
-
-    this.stop();
-
-    if (toString.call(source.scriptNode) === '[object ScriptProcessorNode]') {
-      source.scriptNode.onaudioprocess = null;
-    }
-
-    canvasContext = canvasContext || source.canvasContext;
-    var canvas = canvasContext.canvas;
-    canvasContext.clearRect(0, 0, canvas.width, canvas.height);
-    canvasContext._tempContext.clearRect(0, 0, canvas.width, canvas.height);
-    this._baseCanvasContext.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  Spectrogram.prototype._generateDefaultColors = function(steps) {
-    var frequency = Math.PI / steps;
-    var amplitude = 127;
-    var center = 128;
-    var slice = (Math.PI / 2) * 3.1;
-    var colors = [];
+  Spectrogram.prototype.generateDefaultColors = function(steps) {
+    const frequency = Math.PI / steps;
+    const amplitude = 127;
+    const center = 128;
+    const slice = (Math.PI / 2) * 3.1;
+    let colors = [];
 
     function toRGBString(v) {
       return 'rgba(' + [v,v,v,1].toString() + ')';
     }
 
-    for (var i = 0; i < steps; i++) {
-      var v = (Math.sin((frequency * i) + slice) * amplitude + center) >> 0;
+    for (let i = 0; i < steps; i++) {
+      let v = (Math.sin((frequency * i) + slice) * amplitude + center) >> 0;
 
       colors.push(toRGBString(v));
     }
@@ -267,8 +168,8 @@
     return colors;
   };
 
-  Spectrogram.prototype._getColor = function(index) {
-    var color = this._colors[index>>0];
+  Spectrogram.prototype.getColor = function(index) {
+    let color = this._colors[index>>0];
 
     if (typeof color === 'undefined') {
       color = this._colors[0];
@@ -289,5 +190,4 @@
   } else {
     root.Spectrogram = Spectrogram;
   }
-
 })(this);
