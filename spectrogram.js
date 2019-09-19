@@ -101,10 +101,10 @@
             this.draw(data[i], baseCanvasCtx, 'line')
             this.resetEmergencyFlag();
             // drawing top and bottom border
-          } else if (eedEnd > 0 && i < eedEnd) {
+          } else if (eedEnd > 0 && i < eedEnd && i !== data.length - 1) {
             this.draw(data[i], baseCanvasCtx, 'border')
             // end of emergency event
-          } else if (eedEnd > 0 && (i === eedEnd || i === data.length - 1)) {
+          } else if (eedEnd > 0 && (i === eedEnd || i === data.length -1)) {
             this.draw(data[i], baseCanvasCtx, 'line')
             // no EE just draw as normally
           } else {
